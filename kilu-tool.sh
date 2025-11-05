@@ -1,188 +1,187 @@
 #!/bin/bash
 
-# Animated Skull Terminal Art for BlackArch Linux
-# Colors
+# Tor VPN Setup Script for BlackArch Linux
+# This script configures transparent proxy through Tor
+
+# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-MAGENTA='\033[0;35m'
-GRAY='\033[0;90m'
-WHITE='\033[1;37m'
-BOLD='\033[1m'
 NC='\033[0m'
 
-# Hide cursor
-tput civis
+# Check if running as root
+if [[ $EUID -ne 0 ]]; then
+   echo -e "${RED}This script must be run as root${NC}"
+   exit 1
+fi
 
-# Trap to show cursor on exit
-trap 'tput cnorm; exit' INT TERM EXIT
+# Tor configuration
+TOR_UID=$(id -u debian-tor 2>/dev/null || id -u tor 2>/dev/null)
+TRANS_PORT="9040"
+DNS_PORT="5353"
+VIRT_ADDR="10.192.0.0/10"
+NON_TOR="127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16"
 
-# Clear screen
-clear
-
-# Skull frames for blinking eyes animation
-skull_frame1() {
-cat << "EOF"
-                    _,.-------.,_
-                ,;~'             '~;,
-              ,;                     ;,
-             ;                         ;
-            ,'                         ',
-           ,;                           ;,
-           ; ;      .           .      ; ;
-           | ;   ______       ______   ; |
-           |  `/~"     ~" . "~     "~\'  |
-           |  ~  ,-~~~^~, | ,~^~~~-,  ~  |
-            |   |        }:{        |   |
-            |   l       / | \       !   |
-            .~  (__,.--" .^. "--.,__)  ~.
-            |     ---;' / | \ `;---     |
-             \__.       \/^\/       .__/
-              V| \                 / |V
-               | |T~\___!___!___/~T| |
-               | |`IIII_I_I_I_IIII'| |
-               |  \,III I I I III,/  |
-                \   `~~~~~~~~~~'    /
-                 \   .       .   /
-                   \.    ^    ./
-                     ^~~~^~~~^
-EOF
+# Functions
+print_status() {
+    echo -e "${GREEN}[*]${NC} $1"
 }
 
-# Glitch effect frame
-skull_glitch() {
-cat << "EOF"
-                    _,.-----▓▓.,_
-                ,;~'    ░░       '~;,
-              ,;      ▒▒             ;,
-             ;           ░░            ;
-            ,'        ▓▓               ',
-           ,;            ░░             ;,
-           ; ;      .    ▒▒     .      ; ;
-           | ;   ___█__       ______   ; |
-           |  `/~" ░░  ~" . "~     "~\'  |
-           |  ~  ,-█~~^~, | ,~^~~~-,  ~  |
-            |   |   ▓▓   }:{        |   |
-            |   l    ░░ / | \       !   |
-            .~  (__,.--" .^. "--.,__)  ~.
-            |     ---█' / | \ `;---     |
-             \__.   ░░   \/^\/       .__/
-              V| \ ▒▒             / |V
-               | |T~\___!___!___/~T| |
-               | |`IIII▓I_I_I_IIII'| |
-               |  \,III░I I I III,/  |
-                \   `~~▒~~~~~~~'    /
-                 \   .  ░    .   /
-                   \.    ^    ./
-                     ^~~~^~~~^
-EOF
+print_error() {
+    echo -e "${RED}[!]${NC} $1"
 }
 
-# Animation loop
-animate_skull() {
-    local cycles=0
+print_warning() {
+    echo -e "${YELLOW}[!]${NC} $1"
+}
+
+install_tor() {
+    print_status "Installing Tor..."
+    if ! command -v tor &> /dev/null; then
+        pacman -S tor --noconfirm
+    else
+        print_status "Tor is already installed"
+    fi
+}
+
+backup_configs() {
+    print_status "Backing up configurations..."
+    cp /etc/tor/torrc /etc/tor/torrc.backup.$(date +%Y%m%d_%H%M%S) 2>/dev/null
+    iptables-save > /etc/iptables/iptables.backup.$(date +%Y%m%d_%H%M%S) 2>/dev/null
+}
+
+configure_tor() {
+    print_status "Configuring Tor..."
     
-    while [ $cycles -lt 3 ]; do
-        # Clear and show frame 1
-        clear
-        echo -e "${RED}"
-        skull_frame1
-        echo -e "${NC}"
-        display_info
-        sleep 0.3
-        
-        # Clear and show frame 2 (blink)
-        clear
-        echo -e "${RED}"
-        skull_frame2
-        echo -e "${NC}"
-        display_info
-        sleep 0.15
-        
-        # Back to frame 1
-        clear
-        echo -e "${RED}"
-        skull_frame1
-        echo -e "${NC}"
-        display_info
-        sleep 0.8
-        
-        ((cycles++))
+    cat > /etc/tor/torrc << EOF
+# Tor VPN Configuration
+VirtualAddrNetworkIPv4 $VIRT_ADDR
+AutomapHostsOnResolve 1
+TransPort $TRANS_PORT IsolateClientAddr IsolateClientProtocol IsolateDestAddr IsolateDestPort
+DNSPort $DNS_PORT
+EOF
+
+    chmod 644 /etc/tor/torrc
+}
+
+setup_iptables() {
+    print_status "Configuring iptables rules..."
+    
+    # Flush existing rules
+    iptables -F
+    iptables -t nat -F
+    
+    # Allow Tor user
+    iptables -t nat -A OUTPUT -m owner --uid-owner $TOR_UID -j RETURN
+    
+    # Allow loopback
+    iptables -t nat -A OUTPUT -o lo -j RETURN
+    
+    # Don't route local networks through Tor
+    for NET in $NON_TOR; do
+        iptables -t nat -A OUTPUT -d $NET -j RETURN
     done
     
-    # Glitch effects
-    for i in {1..5}; do
-        clear
-        echo -e "${MAGENTA}"
-        skull_glitch
-        echo -e "${NC}"
-        display_info
-        sleep 0.1
-        
-        clear
-        echo -e "${RED}"
-        skull_frame1
-        echo -e "${NC}"
-        display_info
-        sleep 0.1
-    done
+    # Redirect DNS to Tor
+    iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-ports $DNS_PORT
+    iptables -t nat -A OUTPUT -p tcp --dport 53 -j REDIRECT --to-ports $DNS_PORT
     
-    # Final display
-    clear
-    echo -e "${RED}"
-    skull_frame1
-    echo -e "${NC}"
-    display_info
+    # Redirect all TCP through Tor
+    iptables -t nat -A OUTPUT -p tcp --syn -j REDIRECT --to-ports $TRANS_PORT
+    
+    # Accept established connections
+    iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+    
+    # Allow Tor traffic
+    iptables -A OUTPUT -m owner --uid-owner $TOR_UID -j ACCEPT
+    
+    # Allow loopback
+    iptables -A OUTPUT -o lo -j ACCEPT
+    
+    # Drop everything else
+    iptables -A OUTPUT -j REJECT
+    
+    # Save rules
+    mkdir -p /etc/iptables
+    iptables-save > /etc/iptables/iptables.rules
 }
 
-# Display system info
-display_info() {
-    echo -e "${CYAN}╔═══════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${WHITE}     BlackArch Penetration System     ${CYAN}║${NC}"
-    echo -e "${CYAN}╚═══════════════════════════════════════╝${NC}"
-    echo ""
-    echo -e "${GREEN}[+]${NC} User: ${YELLOW}$(whoami)${NC}"
-    echo -e "${GREEN}[+]${NC} Hostname: ${YELLOW}$(hostname)${NC}"
-    echo -e "${GREEN}[+]${NC} Kernel: ${YELLOW}$(uname -r)${NC}"
-    echo -e "${GREEN}[+]${NC} Uptime: ${YELLOW}$(uptime -p 2>/dev/null || echo "N/A")${NC}"
-    echo -e "${GREEN}[+]${NC} Date: ${YELLOW}$(date '+%Y-%m-%d %H:%M:%S')${NC}"
-    echo ""
-    echo -e "${RED}[!]${NC} ${GRAY}\"In the digital realm, we are all skulls...\"${NC}"
-    echo -e "${MAGENTA}[*]${NC} Ready for exploitation..."
+start_services() {
+    print_status "Starting Tor service..."
+    systemctl enable tor
+    systemctl restart tor
+    sleep 3
+    
+    if systemctl is-active --quiet tor; then
+        print_status "Tor service is running"
+    else
+        print_error "Failed to start Tor service"
+        exit 1
+    fi
+}
+
+check_tor_connection() {
+    print_status "Checking Tor connection..."
+    sleep 2
+    
+    TOR_IP=$(curl -s --socks5 127.0.0.1:9050 https://check.torproject.org/api/ip 2>/dev/null | grep -o '"IsTor":true')
+    
+    if [[ -n "$TOR_IP" ]]; then
+        print_status "Successfully connected to Tor network!"
+        CURRENT_IP=$(curl -s https://api.ipify.org)
+        echo -e "${GREEN}Your current IP: $CURRENT_IP${NC}"
+    else
+        print_warning "Could not verify Tor connection"
+    fi
+}
+
+stop_tor_vpn() {
+    print_status "Stopping Tor VPN..."
+    systemctl stop tor
+    
+    # Flush iptables
+    iptables -F
+    iptables -t nat -F
+    iptables -P INPUT ACCEPT
+    iptables -P OUTPUT ACCEPT
+    iptables -P FORWARD ACCEPT
+    
+    print_status "Tor VPN stopped and iptables rules cleared"
+}
+
+show_status() {
+    echo -e "\n${GREEN}=== Tor VPN Status ===${NC}"
+    systemctl status tor --no-pager -l
+    echo -e "\n${GREEN}=== Current IP ===${NC}"
+    curl -s https://api.ipify.org
     echo ""
 }
 
-# Run animation
-animate_skull
-
-# Show cursor again
-tput cnorm~~~~~~~~'    /
-                 \   .       .   /
-                   \.    ^    ./
-                     ^~~~^~~~^
-EOF
-}
-
-skull_frame2() {
-cat << "EOF"
-                    _,.-------.,_
-                ,;~'             '~;,
-              ,;                     ;,
-             ;                         ;
-            ,'                         ',
-           ,;                           ;,
-           ; ;      .           .      ; ;
-           | ;   ______       ______   ; |
-           |  `/~"     ~" . "~     "~\'  |
-           |  ~  ,-~~~^~, | ,~^~~~-,  ~  |
-            |   |        }:{        |   |
-            |   l       / | \       !   |
-            .~  (__,.--" .^. "--.,__)  ~.
-            |     ---'  / | \  '---     |
-             \__.       \/^\/       .__/
-              V| \                 / |V
-               | |T~\___!___!___/~T| |
-               | |`IIII_I_I_I_IIII'| |
-               |  \,III I I I III,/  |
-                \   `~~
+# Main script
+case "${1:-start}" in
+    start)
+        print_status "Starting Tor VPN setup..."
+        install_tor
+        backup_configs
+        configure_tor
+        setup_iptables
+        start_services
+        check_tor_connection
+        print_status "Tor VPN setup complete!"
+        ;;
+    stop)
+        stop_tor_vpn
+        ;;
+    restart)
+        stop_tor_vpn
+        sleep 2
+        $0 start
+        ;;
+    status)
+        show_status
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|status}"
+        exit 1
+        ;;
+esac
